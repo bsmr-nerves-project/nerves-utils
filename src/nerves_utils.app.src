@@ -1,0 +1,9 @@
+{application, nerves_utils,
+ [
+  {description, "Nerves Utilities"},
+  {vsn, "0.0.1"},
+  {applications, [
+                  kernel,
+                  stdlib
+                 ]}
+ ]}.
