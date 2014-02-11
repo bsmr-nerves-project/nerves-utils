@@ -27,17 +27,17 @@
 -export([run/1, run/2, run/3, cmdpp/1, ps/0]).
 
 % Run the specified executable and return ok on success
--spec run(string()) -> ok | {error, non_neg_integer()}.
+-spec run(string()) -> {ok, binary()} | {error, non_neg_integer()}.
 run(Executable) ->
-    run(Executable, []).
+    run(Executable, [], []).
 
 % Run an executable with the arguments passed in as a list
--spec run(string(), [string()]) -> ok | {error, non_neg_integer()}.
+-spec run(string(), [string()]) -> {ok, binary()} | {error, non_neg_integer()}.
 run(Executable, Args) ->
-    run(Executable, Args, <<>>).
+    run(Executable, Args, []).
 
 % Run an executable with arguments and send Input to it
--spec run(string(), [string()], binary()) -> ok | {error, non_neg_integer()}.
+-spec run(string(), [string()], iodata()) -> {ok, binary()} | {error, non_neg_integer()}.
 run(Executable, Args, Input) ->
     case os:find_executable(Executable) of
 	false ->
@@ -46,17 +46,18 @@ run(Executable, Args, Input) ->
 	    Port = open_port({spawn_executable, FoundExecutable},
 			     [exit_status, {args, Args}, stderr_to_stdout]),
 	    Port ! {self(), {command, Input}},
-	    loop_till_done(Port)
+	    loop_till_done(Port, <<>>)
     end.
 
--spec loop_till_done(port()) -> ok | {error, non_neg_integer()}.
-loop_till_done(Port) ->
+-spec loop_till_done(port(), binary()) -> {ok, binary()} | {error, non_neg_integer()}.
+loop_till_done(Port, Data) ->
     receive
-	{Port, {data, _Data}} ->
-	    % Throw out anything coming in from stdin
-	    loop_till_done(Port);
+	{Port, {data, NewData}} ->
+	    BinaryNewData = list_to_binary(NewData),
+	    ConcatenatedData = <<Data/binary, BinaryNewData/binary>>,
+	    loop_till_done(Port, ConcatenatedData);
 	{Port, {exit_status, 0}} ->
-	    ok;
+	    {ok, Data};
 	{Port, {exit_status, ExitStatus}} ->
 	    {error, ExitStatus}
     end.

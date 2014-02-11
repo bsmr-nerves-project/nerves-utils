@@ -18,19 +18,20 @@
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec mount(string(), string(), atom(), [atom()]) -> ok | {error, non_neg_integer()}.
+
+-spec mount(string(), string(), atom(), [atom()]) -> {ok, iodata()} | {error, non_neg_integer()}.
 mount(Device, Directory, Type, Options) ->
     Arguments = options_to_args(Options) ++ ["-t", atom_to_list(Type), Device, Directory],
     subprocess:run("mount", Arguments).
 
 %% Remount a file system
 %% Example: remount("/", [rw]).
--spec remount(string(), [atom()]) -> ok | {error, non_neg_integer()}.
+-spec remount(string(), [atom()]) -> {ok, iodata()} | {error, non_neg_integer()}.
 remount(Directory, Options) ->
     Arguments = options_to_args([remount | Options]) ++ [Directory],
     subprocess:run("mount", Arguments).
 
--spec umount(string()) -> ok | {error, non_neg_integer()}.
+-spec umount(string()) -> {ok, iodata()} | {error, non_neg_integer()}.
 umount(Directory) ->
     subprocess:run("umount", [Directory]).
 
