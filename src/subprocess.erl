@@ -24,7 +24,7 @@
 
 -module(subprocess).
 
--export([run/1, run/2, run/3, cmdpp/1, ps/0]).
+-export([run/1, run/2, run/3, vrun/2, cmdpp/1, ps/0]).
 
 % Run the specified executable and return ok on success
 -spec run(string()) -> {ok, binary()} | {error, non_neg_integer()}.
@@ -49,6 +49,19 @@ run(Executable, Args, Input) ->
 	    loop_till_done(Port, <<>>)
     end.
 
+% Run an executable with the arguments passed in as a list and print
+% out the programs output as it comes in.
+-spec vrun(string(), [string()]) -> ok | {error, non_neg_integer()}.
+vrun(Executable, Args) ->
+    case os:find_executable(Executable) of
+	false ->
+	    exit(enoent);
+	FoundExecutable ->
+	    Port = open_port({spawn_executable, FoundExecutable},
+			     [exit_status, {args, Args}, stderr_to_stdout]),
+	    verbose_loop_till_done(Port)
+    end.
+
 -spec loop_till_done(port(), binary()) -> {ok, binary()} | {error, non_neg_integer()}.
 loop_till_done(Port, Data) ->
     receive
@@ -58,6 +71,19 @@ loop_till_done(Port, Data) ->
 	    loop_till_done(Port, ConcatenatedData);
 	{Port, {exit_status, 0}} ->
 	    {ok, Data};
+	{Port, {exit_status, ExitStatus}} ->
+	    {error, ExitStatus}
+    end.
+
+-spec verbose_loop_till_done(port()) -> ok | {error, non_neg_integer()}.
+verbose_loop_till_done(Port) ->
+    receive
+	{Port, {data, NewData}} ->
+	    lists:foreach(fun(A) -> io:format("~s~n", [A]) end,
+			  string:tokens(NewData, "\n")),
+	    verbose_loop_till_done(Port);
+	{Port, {exit_status, 0}} ->
+	    ok;
 	{Port, {exit_status, ExitStatus}} ->
 	    {error, ExitStatus}
     end.
