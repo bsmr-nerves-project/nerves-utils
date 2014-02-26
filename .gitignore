@@ -6,3 +6,4 @@ deps
 erl_crash.dump
 ebin
 .depsolver_plt
+.erlang.mk.packages.v1
