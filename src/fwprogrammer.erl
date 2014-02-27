@@ -54,8 +54,14 @@ start_link() ->
 
 
 %% @doc program/3 runs the firmware update on the specified destination.
+%%
+%% To update the SDCard on the Beaglebone in the shell:
+%%
+%% fwprogrammer:start_link().
+%% fwprogrammer:program("/tmp/bbb.fw", autoupdate, "/dev/mmcblk0").
+%%
 %% @end
--spec program(string(), string(), string()) -> ok.
+-spec program(string(), atom(), string()) -> ok.
 program(FirmwarePath, UpdateType, DestinationPath) ->
     gen_server:call(?SERVER,
 		    {program, FirmwarePath, UpdateType, DestinationPath},
