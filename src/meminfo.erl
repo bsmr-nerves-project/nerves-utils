@@ -20,9 +20,9 @@ process(["MemTotal", T, "kB" | Rest], Result) ->
     process(Rest, [{mem_total, list_to_integer(T)} | Result]);
 process(["MemFree", T, "kB" | Rest], Result) ->
     process(Rest, [{mem_free, list_to_integer(T)} | Result]);
-process([_X, "0" | Rest], Result) ->
+process([_X, _Y, "kB" | Rest], Result) ->
     process(Rest, Result);
-process([_X, _Y, _Z | Rest], Result) ->
+process([_X, "0" | Rest], Result) ->
     process(Rest, Result);
 process([], Result) ->
     Result.
