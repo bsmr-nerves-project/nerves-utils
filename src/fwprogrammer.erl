@@ -200,7 +200,7 @@ run_command([<<"fail">>, Message], _Instructions, _ZipHandle, _Writer) ->
     exit(binary_to_list(Message)).
 
 %% Since Erlang can't read or write to device files directly, we
-%% may need to use a helper program like dd or mmccopy. The following
+%% may need to use a helper program like mmccopy. The following
 %% code figures out what to do.
 -spec open_destination(string()) -> {ok, term()} | {error, term()}.
 open_destination(DestinationPath) ->
@@ -234,13 +234,7 @@ open_destination(DestinationPath) ->
 open_destination_helper(DestinationPath) ->
     case os:find_executable("mmccopy") of
 	false ->
-	    case os:find_executable("dd") of
-		false ->
-		    {error, nohelper};
-		Dd ->
-		    io:format("WARNING: Didn't find mmccopy so going to use dd~n"),
-		    {ok, {dd, Dd, DestinationPath}}
-	    end;
+	    {error, nohelper};
 	Mmccopy ->
 	    {ok, {mmccopy, Mmccopy, DestinationPath}}
     end.
@@ -248,11 +242,6 @@ open_destination_helper(DestinationPath) ->
 -spec pwrite(term(), non_neg_integer(), binary()) -> ok | {error, term()}.
 pwrite({file, Handle}, Location, Data) ->
     file:pwrite(Handle, Location, Data);
-pwrite({dd, Dd, DestinationPath}, Location, Data) ->
-    LocationBlocks = Location div 512,
-    Args = ["of=" ++ DestinationPath, "seek=" ++ integer_to_list(LocationBlocks)],
-    {ok,_} = subprocess:run(Dd, Args, Data),
-    ok;
 pwrite({mmccopy, Mmccopy, DestinationPath}, Location, Data) ->
     DataSize = byte_size(Data),
     Args = ["-d", DestinationPath,
@@ -266,13 +255,6 @@ pwrite({mmccopy, Mmccopy, DestinationPath}, Location, Data) ->
 -spec pread(term(), non_neg_integer(), non_neg_integer()) -> {ok, binary()} | {error, term()}.
 pread({file, Handle}, Location, Number) ->
     file:pread(Handle, Location, Number);
-pread({dd, Dd, DestinationPath}, Location, Number) ->
-    LocationBlocks = Location div 512,
-    NumberBlocks = Number div 512,
-    Args = ["if=" ++ DestinationPath,
-	    "skip=" ++ integer_to_list(LocationBlocks),
-	    "count=" ++ integer_to_list(NumberBlocks)],
-    subprocess:run(Dd, Args);
 pread({mmccopy, Mmccopy, DestinationPath}, Location, Number) ->
     Args = ["-r",
 	    "-d", DestinationPath,
@@ -285,6 +267,4 @@ pread({mmccopy, Mmccopy, DestinationPath}, Location, Number) ->
 close_destination({file, Handle}) ->
     file:close(Handle);
 close_destination({mmccopy, _Mmccopy, _DestinationPath}) ->
-    ok;
-close_destination({dd, _Dd, _DestinationPath}) ->
     ok.
