@@ -50,7 +50,7 @@ run(Executable, Args, Input) ->
     end.
 
 % Run an executable with the arguments passed in as a list and print
-% out the programs output as it comes in.
+% out the program's output as it comes in.
 -spec vrun(string(), [string()]) -> ok | {error, non_neg_integer()}.
 vrun(Executable, Args) ->
     case os:find_executable(Executable) of

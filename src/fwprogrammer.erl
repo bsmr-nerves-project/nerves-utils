@@ -38,6 +38,14 @@
 
 -record(state, {}).
 
+%% Information about the firmware
+-record(fwinfo,
+        { destpath,
+	  writer,
+	  ziphandle,
+	  instructions
+	  }).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -105,7 +113,14 @@ handle_call({program, FirmwarePath, UpdateType, DestinationPath}, _From, State) 
     {ok, ZipHandle} = zip:zip_open(FirmwarePath, [memory]),
     {ok, {_, InstructionsBin}} = zip:zip_get("instructions.json", ZipHandle),
     Instructions = jsx:decode(InstructionsBin, [{labels, atom}]),
-    run_update(UpdateType, Instructions, ZipHandle, Writer),
+
+    Fwinfo = #fwinfo{destpath=DestinationPath,
+		     writer=Writer,
+		     ziphandle=ZipHandle,
+		     instructions=Instructions},
+
+    run_update(UpdateType, Fwinfo),
+
     close_destination(Writer),
     ok = zip:zip_close(ZipHandle),
     {reply, ok, State}.
@@ -164,39 +179,62 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
-run_update(UpdateType, Instructions, ZipHandle, Writer) ->
-    case proplists:get_value(UpdateType, Instructions) of
+run_update(UpdateType, Fwinfo) ->
+    case proplists:get_value(UpdateType, Fwinfo#fwinfo.instructions) of
 	undefined -> exit(unsupported_upgrade);
-	Update -> run_commands(Update, Instructions, ZipHandle, Writer)
+	Update -> run_commands(Update, Fwinfo)
     end.
 
-run_commands([], _Instructions, _ZipHandle, _Writer) -> ok;
-run_commands([Command|T], Instructions, ZipHandle, Writer) ->
-    case run_command(Command, Instructions, ZipHandle, Writer) of
+run_commands([], _Fwinfo) -> ok;
+run_commands([Command|T], Fwinfo) ->
+    case run_command(Command, Fwinfo) of
 	done ->
 	    ok;
 	keep_going ->
-	    run_commands(T, Instructions, ZipHandle, Writer)
+	    run_commands(T, Fwinfo)
     end.
 
 % Run a command in the instructions.json list
-run_command([<<"pwrite">>, Path, Location, Size], _Instructions, ZipHandle, Writer) ->
-    {ok, {_, Data}} = zip:zip_get(binary_to_list(Path), ZipHandle),
+run_command([<<"pwrite">>, Path, Location, Size], Fwinfo) ->
+    % Write the specified file in the update package to a location in
+    % the target image.
+    {ok, {_, Data}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
     Size = byte_size(Data),
-    ok = pwrite(Writer, Location, Data),
+    ok = pwrite(Fwinfo#fwinfo.writer, Location, Data),
     keep_going;
-run_command([<<"compare_and_run">>, Path, Location, Size, SuccessUpdateType], Instructions, ZipHandle, Writer) ->
-    {ok, {_, CheckData}} = zip:zip_get(binary_to_list(Path), ZipHandle),
+run_command([<<"fat_write_file">>, Path, Location, FatFilename], Fwinfo) ->
+    % Write the specified Path to the file FatFilename in the
+    % FAT filesystem at Location.
+    {ok, {_, Data}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
+    ok = fatfs:write_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FatFilename), Data),
+    keep_going;
+run_command([<<"compare_and_run">>, Path, Location, Size, SuccessUpdateType], Fwinfo) ->
+    % Compare the raw contents of a location in the target image with the
+    % the specified file and "branch" to other update instructions if a match
+    {ok, {_, CheckData}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
     Size = byte_size(CheckData),
-    {ok, ActualData} = pread(Writer, Location, Size),
+    {ok, ActualData} = pread(Fwinfo#fwinfo.writer, Location, Size),
     if
 	ActualData =:= CheckData ->
-	    run_update(binary_to_atom(SuccessUpdateType, latin1), Instructions, ZipHandle, Writer),
+	    run_update(binary_to_atom(SuccessUpdateType, latin1), Fwinfo),
 	    done;
 	true ->
 	    keep_going
     end;
-run_command([<<"fail">>, Message], _Instructions, _ZipHandle, _Writer) ->
+run_command([<<"fat_compare_and_run">>, Path, Location, FatFilename, SuccessUpdateType], Fwinfo) ->
+    % Compare the contents of a file in a FAT partition located at Location with
+    % file in the update archive. If they match, then "branch" to other update
+    % instructions.
+    {ok, {_, CheckData}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
+    {ok, ActualData} = fatfs:read_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FatFilename)),
+    if
+	ActualData =:= CheckData ->
+	    run_update(binary_to_atom(SuccessUpdateType, latin1), Fwinfo),
+	    done;
+	true ->
+	    keep_going
+    end;
+run_command([<<"fail">>, Message], _Fwinfo) ->
     exit(binary_to_list(Message)).
 
 %% Since Erlang can't read or write to device files directly, we
