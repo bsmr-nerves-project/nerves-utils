@@ -1,9 +1,10 @@
 {application, nerves_utils,
  [
   {description, "Nerves Utilities"},
-  {vsn, "0.0.1"},
+  {vsn, "0.1.2"},
   {applications, [
                   kernel,
-                  stdlib
+                  stdlib,
+                  jsx
                  ]}
  ]}.
