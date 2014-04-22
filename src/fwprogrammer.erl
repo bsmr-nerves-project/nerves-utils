@@ -73,7 +73,7 @@ start_link() ->
 program(FirmwarePath, UpdateType, DestinationPath) ->
     gen_server:call(?SERVER,
 		    {program, FirmwarePath, UpdateType, DestinationPath},
-		    120000).
+		    infinity).
 
 
 %%%===================================================================
