@@ -41,8 +41,7 @@
 %% Information about the firmware
 -record(fwinfo,
         { destpath,
-	  writer,
-	  ziphandle,
+	  fwpath,
 	  instructions
 	  }).
 
@@ -109,20 +108,16 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call({program, FirmwarePath, UpdateType, DestinationPath}, _From, State) ->
-    {ok, Writer} = open_destination(DestinationPath),
-    {ok, ZipHandle} = zip:zip_open(FirmwarePath, [memory]),
-    {ok, {_, InstructionsBin}} = zip:zip_get("instructions.json", ZipHandle),
+    ok = check_destination(DestinationPath),
+    {ok, InstructionsBin} = unzip:read_file(FirmwarePath, "instructions.json"),
     Instructions = jsx:decode(InstructionsBin, [{labels, atom}]),
 
     Fwinfo = #fwinfo{destpath=DestinationPath,
-		     writer=Writer,
-		     ziphandle=ZipHandle,
+		     fwpath=FirmwarePath,
 		     instructions=Instructions},
 
     run_update(UpdateType, Fwinfo),
 
-    close_destination(Writer),
-    ok = zip:zip_close(ZipHandle),
     {reply, ok, State}.
 
 %%--------------------------------------------------------------------
@@ -198,22 +193,24 @@ run_commands([Command|T], Fwinfo) ->
 run_command([<<"pwrite">>, Path, Location, Size], Fwinfo) ->
     % Write the specified file in the update package to a location in
     % the target image.
-    {ok, {_, Data}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
-    Size = byte_size(Data),
-    ok = pwrite(Fwinfo#fwinfo.writer, Location, Data),
+    ok = unzip:copy_to_file(Fwinfo#fwinfo.fwpath,
+			    binary_to_list(Path),
+			    Size,
+			    Fwinfo#fwinfo.destpath,
+			    Location),
     keep_going;
 run_command([<<"fat_write_file">>, Path, Location, FatFilename], Fwinfo) ->
     % Write the specified Path to the file FatFilename in the
     % FAT filesystem at Location.
-    {ok, {_, Data}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
+    {ok, Data} = unzip:read_all(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
     ok = fatfs:write_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FatFilename), Data),
     keep_going;
 run_command([<<"compare_and_run">>, Path, Location, Size, SuccessUpdateType], Fwinfo) ->
     % Compare the raw contents of a location in the target image with the
     % the specified file and "branch" to other update instructions if a match
-    {ok, {_, CheckData}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
+    {ok, CheckData} = unzip:read_all(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
     Size = byte_size(CheckData),
-    {ok, ActualData} = pread(Fwinfo#fwinfo.writer, Location, Size),
+    {ok, ActualData} = pread(Fwinfo#fwinfo.destpath, Location, Size),
     if
 	ActualData =:= CheckData ->
 	    run_update(binary_to_atom(SuccessUpdateType, latin1), Fwinfo),
@@ -225,7 +222,7 @@ run_command([<<"fat_compare_and_run">>, Path, Location, FatFilename, SuccessUpda
     % Compare the contents of a file in a FAT partition located at Location with
     % file in the update archive. If they match, then "branch" to other update
     % instructions.
-    {ok, {_, CheckData}} = zip:zip_get(binary_to_list(Path), Fwinfo#fwinfo.ziphandle),
+    {ok, CheckData} = unzip:read_file(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
     {ok, ActualData} = fatfs:read_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FatFilename)),
     if
 	ActualData =:= CheckData ->
@@ -237,16 +234,13 @@ run_command([<<"fat_compare_and_run">>, Path, Location, FatFilename, SuccessUpda
 run_command([<<"fail">>, Message], _Fwinfo) ->
     exit(binary_to_list(Message)).
 
-%% Since Erlang can't read or write to device files directly, we
-%% may need to use a helper program like mmccopy. The following
-%% code figures out what to do.
--spec open_destination(string()) -> {ok, term()} | {error, term()}.
-open_destination(DestinationPath) ->
+%% Check the destination so that we can give a decent error message
+-spec check_destination(string()) -> {ok, term()} | {error, term()}.
+check_destination(DestinationPath) ->
     case file:read_file_info(DestinationPath) of
 	{error, enoent} ->
-	    % File doesn't exist, so create it.
-	    {ok, Handle} = file:open(DestinationPath, [read,write,binary]),
-	    {ok, {file, Handle}};
+	    % File doesn't exist. That's ok.
+	    ok;
 	{error, Reason} ->
 	    % Something's wrong
 	    io:format("Error: Problem with ~p~n", [DestinationPath]),
@@ -260,40 +254,17 @@ open_destination(DestinationPath) ->
 	    io:format("Error: ~p is directory. Expecting a file or device.~n", [DestinationPath]),
 	    {error, eisdir};
 	{ok, #file_info{type = regular}} ->
-	    % If a regular file, then just use Erlang
-	    {ok, Handle} = file:open(DestinationPath, [read,write,binary]),
-	    {ok, {file, Handle}};
+	    % Regular files are ok.
+	    ok;
 	{ok, #file_info{type = device}} ->
-	    % Device file. Erlang's file module won't allow writes
-	    % to devices, so check for helpers
-	    open_destination_helper(DestinationPath)
+	    % Device files are ok too since we use mmccopy.
+	    ok
     end.
 
-open_destination_helper(DestinationPath) ->
-    case os:find_executable("mmccopy") of
-	false ->
-	    {error, nohelper};
-	Mmccopy ->
-	    {ok, {mmccopy, Mmccopy, DestinationPath}}
-    end.
 
--spec pwrite(term(), non_neg_integer(), binary()) -> ok | {error, term()}.
-pwrite({file, Handle}, Location, Data) ->
-    file:pwrite(Handle, Location, Data);
-pwrite({mmccopy, Mmccopy, DestinationPath}, Location, Data) ->
-    DataSize = byte_size(Data),
-    Args = ["-d", DestinationPath,
-	    "-s", integer_to_list(DataSize),
-	    "-o", integer_to_list(Location),
-	    "-q",
-	    "-"],
-    {ok,_} = subprocess:run(Mmccopy, Args, Data),
-    ok.
-
--spec pread(term(), non_neg_integer(), non_neg_integer()) -> {ok, binary()} | {error, term()}.
-pread({file, Handle}, Location, Number) ->
-    file:pread(Handle, Location, Number);
-pread({mmccopy, Mmccopy, DestinationPath}, Location, Number) ->
+-spec pread(string(), non_neg_integer(), non_neg_integer()) -> {ok, binary()} | {error, term()}.
+pread(DestinationPath, Location, Number) ->
+    Mmccopy = os:find_executable("mmccopy"),
     Args = ["-r",
 	    "-d", DestinationPath,
 	    "-s", integer_to_list(Number),
@@ -301,8 +272,3 @@ pread({mmccopy, Mmccopy, DestinationPath}, Location, Number) ->
 	    "-q",
 	    "-"],
     subprocess:run(Mmccopy, Args).
-
-close_destination({file, Handle}) ->
-    file:close(Handle);
-close_destination({mmccopy, _Mmccopy, _DestinationPath}) ->
-    ok.
