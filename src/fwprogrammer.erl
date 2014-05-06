@@ -202,13 +202,13 @@ run_command([<<"pwrite">>, Path, Location, Size], Fwinfo) ->
 run_command([<<"fat_write_file">>, Path, Location, FatFilename], Fwinfo) ->
     % Write the specified Path to the file FatFilename in the
     % FAT filesystem at Location.
-    {ok, Data} = unzip:read_all(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
+    {ok, Data} = unzip:read_file(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
     ok = fatfs:write_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FatFilename), Data),
     keep_going;
 run_command([<<"compare_and_run">>, Path, Location, Size, SuccessUpdateType], Fwinfo) ->
     % Compare the raw contents of a location in the target image with the
     % the specified file and "branch" to other update instructions if a match
-    {ok, CheckData} = unzip:read_all(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
+    {ok, CheckData} = unzip:read_file(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
     Size = byte_size(CheckData),
     {ok, ActualData} = pread(Fwinfo#fwinfo.destpath, Location, Size),
     if
