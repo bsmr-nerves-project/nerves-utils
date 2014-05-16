@@ -205,6 +205,14 @@ run_command([<<"fat_write_file">>, Path, Location, FatFilename], Fwinfo) ->
     {ok, Data} = unzip:read_file(Fwinfo#fwinfo.fwpath, binary_to_list(Path)),
     ok = fatfs:write_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FatFilename), Data),
     keep_going;
+run_command([<<"fat_rm_file">>, Location, FatFilename], Fwinfo) ->
+    % Errors from rm are ignored.
+    fatfs:rm_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FatFilename)),
+    keep_going;
+run_command([<<"fat_mv_file">>, Location, FromFatFilename, ToFatFilename], Fwinfo) ->
+    % Errors from mv are ignored.
+    fatfs:mv_file({Fwinfo#fwinfo.destpath, Location}, binary_to_list(FromFatFilename), binary_to_list(ToFatFilename)),
+    keep_going;
 run_command([<<"compare_and_run">>, Path, Location, Size, SuccessUpdateType], Fwinfo) ->
     % Compare the raw contents of a location in the target image with the
     % the specified file and "branch" to other update instructions if a match

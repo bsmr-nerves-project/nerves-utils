@@ -23,7 +23,7 @@
 %% SOFTWARE.
 -module(fatfs).
 
--export([read_file/2, write_file/3]).
+-export([read_file/2, write_file/3, rm_file/2, mv_file/3]).
 
 %% Read, write, and manipulate files on a FAT filesystem
 %% This module requires mtools to be installed to work.
@@ -57,6 +57,32 @@ write_file({RawImage, FatPartitionOffset}, DosFilename, Contents) ->
 	{error, Reason} ->
 	    file:delete(TempFilename),
 	    {error, {mcopy_failed, Reason}}
+    end.
+
+% Delete a file on a FAT file system
+-spec rm_file({string(), non_neg_integer()}, string()) -> ok | {error, term()}.
+rm_file({RawImage, FatPartitionOffset}, DosFilename) ->
+    case subprocess:run("mdel", ["-i",
+				  RawImage ++ "@@" ++ integer_to_list(FatPartitionOffset),
+				  "::" ++ DosFilename]) of
+	{ok, _} ->
+	    ok;
+	{error, Reason} ->
+	    {error, {mdel_failed, Reason}}
+    end.
+
+% Move a file on a FAT file system
+-spec mv_file({string(), non_neg_integer()}, string(), string()) -> ok | {error, term()}.
+mv_file({RawImage, FatPartitionOffset}, FromDosFilename, ToDosFilename) ->
+    case subprocess:run("mdel", ["-i",
+				  RawImage ++ "@@" ++ integer_to_list(FatPartitionOffset),
+				  "::" ++ FromDosFilename,
+				  "::" ++ ToDosFilename
+				]) of
+	{ok, _} ->
+	    ok;
+	{error, Reason} ->
+	    {error, {mdel_failed, Reason}}
     end.
 
 -spec temp_filename() -> string().
